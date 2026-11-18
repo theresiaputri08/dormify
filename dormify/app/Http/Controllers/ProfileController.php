@@ -1,0 +1,162 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\Report;
+
+class ReportController extends Controller
+{
+    public function index(Request $request)
+    {
+        $query = Report::query();
+
+        if (auth()->user()->role != 'admin') {
+            $query->where('user_id', auth()->id());
+        }
+
+        if ($request->search) {
+            $query->where(function ($q) use ($request) {
+                $q->where('title', 'like', '%' . $request->search . '%')
+                  ->orWhere('category', 'like', '%' . $request->search . '%')
+                  ->orWhere('dormitory', 'like', '%' . $request->search . '%')
+                  ->orWhere('status', 'like', '%' . $request->search . '%');
+            });
+        }
+
+        if ($request->status) {
+            $query->where('status', $request->status);
+        }
+
+        $reports = $query->latest()->paginate(5)->withQueryString();
+
+        return view('reports.index', compact('reports'));
+    }
+
+    public function create()
+    {
+        return view('reports.create');
+    }
+
+    public function store(Request $request)
+    {
+        $request->validate([
+            'title' => 'required',
+            'category' => 'required',
+            'dormitory' => 'required',
+            'description' => 'required',
+            'proof_image' => 'nullable|image|mimes:jpg,jpeg,png|max:2048',
+        ]);
+
+        $imageName = null;
+
+        if ($request->hasFile('proof_image')) {
+            $image = $request->file('proof_image');
+            $imageName = time() . '.' . $image->getClientOriginalExtension();
+            $image->move(public_path('uploads'), $imageName);
+        }
+
+        Report::create([
+            'user_id' => auth()->id(),
+            'sender_name' => $request->sender_name,
+            'title' => $request->title,
+            'category' => $request->category,
+            'dormitory' => $request->dormitory,
+            'description' => $request->description,
+            'is_anonymous' => $request->has('is_anonymous'),
+            'proof_image' => $imageName,
+            'status' => 'Pending',
+            'admin_response' => null,
+        ]);
+
+        return redirect('/reports')->with('success', 'Laporan berhasil dikirim!');
+    }
+
+    public function show(Report $report)
+    {
+        if (auth()->user()->role != 'admin' && $report->user_id != auth()->id()) {
+            abort(403);
+        }
+
+        return view('reports.show', compact('report'));
+    }
+
+    public function edit(Report $report)
+    {
+        if (auth()->user()->role == 'admin') {
+            abort(403);
+        }
+
+        if ($report->user_id != auth()->id()) {
+            abort(403);
+        }
+
+        if ($report->status != 'Pending') {
+            return redirect('/reports')->with('success', 'Laporan tidak bisa diedit!');
+        }
+
+        return view('reports.edit', compact('report'));
+    }
+
+    public function update(Request $request, Report $report)
+    {
+        if (auth()->user()->role == 'admin') {
+            abort(403);
+        }
+
+        if ($report->user_id != auth()->id()) {
+            abort(403);
+        }
+
+        if ($report->status != 'Pending') {
+            return redirect('/reports');
+        }
+
+        $request->validate([
+            'title' => 'required',
+            'category' => 'required',
+            'dormitory' => 'required',
+            'description' => 'required',
+        ]);
+
+        $report->update([
+            'title' => $request->title,
+            'category' => $request->category,
+            'dormitory' => $request->dormitory,
+            'description' => $request->description,
+        ]);
+
+        return redirect('/reports')->with('success', 'Laporan berhasil diupdate!');
+    }
+
+    public function destroy(Report $report)
+    {
+        if (auth()->user()->role != 'admin') {
+            abort(403);
+        }
+
+        $report->delete();
+
+        return redirect('/reports')->with('success', 'Laporan berhasil dihapus!');
+    }
+
+    public function updateStatus(Request $request, Report $report)
+    {
+        if (auth()->user()->role != 'admin') {
+            abort(403);
+        }
+
+        $request->validate([
+            'status' => 'required',
+            'admin_response' => 'nullable',
+        ]);
+
+        $report->update([
+            'status' => $request->status,
+            'admin_response' => $request->admin_response,
+        ]);
+
+        return redirect('/reports/' . $report->id)
+            ->with('success', 'Status berhasil diperbarui!');
+    }
+}
